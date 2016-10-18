@@ -1,0 +1,196 @@
+#!/usr/bin/perl
+$| = 1;
+use Getopt::Long;
+
+$DEBUG = 0;
+handle_command_line();
+
+if (@ARGV < 1) {
+	print "Usage: treediff <tree1> <tree2>\n";
+	exit;
+}
+my ($tree_1, $tree_2) = @ARGV;
+
+
+
+die "$tree_1 does not point to a directory" unless (-d $tree_1);
+die "$tree_2 does not point to a directory" unless (-d $tree_2);
+
+
+my $tree_1_hash = {};
+print "Traversing first tree...";
+traverse_tree($tree_1_hash, $tree_1);
+print "done.\n";
+my $tree_2_hash = {};
+print "Traversing second tree...";
+traverse_tree($tree_2_hash, $tree_2);
+print "done.\n";
+
+my $compare_hash = {};
+print "Comparing trees...";
+compare_trees($tree_1, $tree_1_hash, $tree_2, $tree_2_hash, $compare_hash);
+print "done.\n";
+
+print_hash_vals($compare_hash);
+
+
+sub compare_trees
+{
+	my ($tree_1, $tree_1_hash, $tree_2, $tree_2_hash, $compare_hash) = @_;
+	my ($same, $different, $tree_one_only, $tree_two_only);
+
+	$same 		= "same     ";
+	$different	= "different";
+	$tree_one_only	= "<--- only";
+	$tree_two_only	= "---> only";
+	$ver_diff_only  = "vers diff";
+
+	foreach $file (keys %{$tree_1_hash}) {
+		if (exists $tree_2_hash->{$file}) {
+			($ret_val, $ret_string) = compare_trees_file($tree_1, $tree_2, $file);
+			if ($ret_val and $ret_string and !$ignore_ver_diffs) {
+				$compare_hash->{$file} = $ver_diff_only;
+			} elsif ($ret_val) {
+				$compare_hash->{$file} = $same;
+			} else {
+				$compare_hash->{$file} = $different;
+			}
+		} else {
+			$compare_hash->{$file} = $tree_one_only;
+		}
+	} 
+	foreach $file (keys %{$tree_2_hash}) {
+		next if ($compare_hash->{$file});
+		$compare_hash->{$file} = $tree_two_only;
+	}
+} 
+
+
+sub compare_trees_file
+{
+	my ($tree_1, $tree_2, $file) = @_;
+
+	$file_1 = $tree_1."/".$file;
+	$file_2 = $tree_2."/".$file;
+
+        #$sum_1 = `sum "$file_1"` if (-e $file_1);
+        #$sum_2 = `sum "$file_2"` if (-e $file_2);
+
+        if (-e $file_1 and -e $file_2) {
+                if (($file_1 =~ /\.cpp$/ or $file_1 =~ /\.C$/ or $file_1 =~ /\.h$/ or $file_1 =~ /makefile$/ or $file_1 =~ /\.diml$/) and $show_ver_diffs) {
+                        @output = `diff -w "$file_1" "$file_2" 2>/dev/null`;
+                        $compare = 1;
+                        print "$file_1, $file_2\n" if $DEBUG;
+                        if (@output eq 0) {
+                                return $compare;
+                        }
+                        if ($output[1] =~ /\$Id:/ and $output[3] =~ /\$Id:/ and @output eq 4) {
+                                $ret_string = ":version/branch diff only\n";
+                                print "$ret_string" if $DEBUG;
+                        } else {
+                                print "real diff\n" if $DEBUG;
+                                $compare = 0;
+                        }
+                        $lines = @output;
+                        print "lines: $lines\n" if $DEBUG;
+                        if ($DEBUG) {
+                                foreach $line (@output) { print "\t$line"; }
+                        }
+			return ($compare, $ret_string);
+		} else {
+        		$sum_1 = `sum "$file_1"`;
+		        $sum_2 = `sum "$file_2"`;
+		}
+	} else {
+		print "$file_1, $file_2 (a file does not exist)\n";
+		return "1";
+	}
+
+
+	print "Comparing files: $file_1, $file_2\n" if $DEBUG;
+	print "Sum1: $sum_1" if $DEBUG;
+	print "Sum2: $sum_2" if $DEBUG;
+
+	my ($field_1_1, $field_1_2) = split(/ +/, $sum_1);
+	my ($field_2_1, $field_2_2) = split(/ +/, $sum_2);
+	if ( ($field_1_1 eq $field_2_1) and ($field_1_2 eq $field_2_2) ) {
+		print "files compare\n" if $DEBUG;
+		return "1";
+	} else {
+		print "files differ\n" if $DEBUG;
+		return "0";
+	}
+}
+
+sub print_hash_vals 
+{
+	my($hash) = @_;
+	foreach $key (sort keys %{$hash}) {
+		$value = $hash->{$key};
+		next if ($value =~ /^same/);
+		print "$value\t$key\n";
+	}
+}
+
+sub traverse_tree
+{
+	my ($hash, $tree, $base) = @_;
+	my ($start_dir, $node, $full_node_spec, @nodes );
+	local (%duplicates);
+	$start_dir = `pwd`;
+	chomp $start_dir;
+	#($tree =~ s/\/^//); # I can't remember what this bad regular expression was supposed to
+	chdir($tree);        # do.  It's probably incorrect for strip the beginning / char.
+#	print "Location: $start_dir $tree\n";
+	$base = "." unless ($base);
+	if (!opendir(DIR,"./"))
+	{
+		print "Dir does not exist in both trees $tree";
+		chdir ($start_dir);
+		return;
+	}
+	opendir(DIR, "./") or die "serious dainbramage: $!";
+	@nodes = grep !/^\.\.?$/, readdir(DIR);
+	closedir(DIR);
+	foreach $node (@nodes) {
+		$full_node_spec = $base."/".$node;
+		$duplicates{$full_node_spec}++;
+		print "$full_node_spec\n" if $DEBUG;
+		if ($duplicates{$full_node_spec} > 1) {
+			print "DUPLICATE PATH In same tree (must be circular link): ";
+			print "$full_node_spec\n";
+			exit;
+		} else {
+			print "." if $DEBUG;
+		}
+		if (-l $node) { 
+			$target = readlink($node);
+			next if ($target eq "."); # don't loop on links which points to itself
+						  # e.g. the HB3 g->. directory link.
+			next if ($target eq $start_dir);  # don't loop into directory just in.
+							  # Not foolproof!
+			if (-d $target) { 
+				traverse_tree($hash, $node, $full_node_spec);
+			} else {
+				$hash->{$full_node_spec} = ""; 
+			}	
+		} elsif (-d $node) {
+			#$hash->{$full_node_spec} = ""; 
+			traverse_tree($hash, $node, $full_node_spec);
+		}
+		elsif (-f $node) { $hash->{$full_node_spec} = ""; }
+		else { $hash->{$full_node_spec} = ""; }
+	}
+	chdir($start_dir);
+}
+
+sub handle_command_line
+{
+        GetOptions( "help!" => \$help,
+                "debug!" => \$DEBUG,
+                "show_ver_diffs!" => \$show_ver_diffs,
+                "ignore_ver_diffs!" => \$ignore_ver_diffs,
+	);
+	$show_ver_diffs = 1 if ($ignore_ver_diffs);
+}
+
