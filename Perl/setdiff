@@ -1,0 +1,151 @@
+#!/usr/bin/perl
+
+###############################################################################
+# setdiff:
+#
+# Get the difference between two sets.  Sets are provided as two list files.
+# can also ask for the intersection or the union of the two sets or the
+# elements only in the first file (--leftonly) or the elements only in the 
+# second file (--rightonly).
+#
+# default report is: 
+#    elements in both files      (both), 
+#    elements in the first file  (<---), and
+#    elements in the second file (--->).
+#
+# special reports (--intersection, --union, --leftonly, --rightonly)
+# display the elements in that group only.
+# 
+###############################################################################
+
+use Getopt::Long;
+
+handle_command_line();
+
+my ($list1, $list2) = @ARGV;
+
+if (! $list1) 
+{
+    print "Usage setdiff <file_one> [<file_two>] [ --intersection | --union | --leftonly | --rightonly ]\n";
+    exit;
+}
+
+if (! -f $list1)
+{
+    print "No such file: $list1\n";
+}
+
+if ($list2 and ! -f $list2)
+{
+    print "No such file: $list2\n";
+}
+
+if ( ($intersection + $union + $leftonly + $rightonly) > 1 )
+{
+    print "Please choose only one from --intersection or --union or --leftonly or --rightonly\n";
+    exit;
+}
+
+
+open(FILEONE, "< $list1") or die "unable to open $list1" if ($list1);
+open(FILETWO, "< $list2") or die "unable to open $list2" if ($list2);
+
+
+foreach $line (<FILEONE>)
+{
+    $element = trim($line);
+    $hash_one{$element} = 1;
+}
+close (FILEONE);
+
+foreach $line (<FILETWO>)
+{
+    $element = trim($line);
+    $hash_two{$element} = 1;
+}
+close (FILETWO);
+
+
+foreach $element (keys %hash_one)
+{
+    if ($hash_two{$element})
+    {
+        $status{$element} = "both";
+        push(@both, $element);
+    }
+    else
+    {
+        $status{$element} = "<-- only";
+        push(@leftset, $element);
+    }
+}
+
+foreach $element (keys %hash_two)
+{
+    if (! $hash_one{$element})
+    {
+        $status{$element} = "--> only";
+        push(@rightset, $element);
+    }
+    elsif (! $status{$element} eq "both")
+    {
+        print "Error: set2 element: $element also in set1 but not set to \"both\". \n";
+    }
+}
+
+
+if ($intersection)
+{
+    print_array("", @both);
+}
+elsif ($union)
+{
+    print_array("", @both, @leftset, @rightset);
+}
+elsif ($leftonly)
+{
+    print_array("", @leftset);
+}
+elsif ($rightonly)
+{
+    print_array("", @rightset);
+}
+else
+{
+    print_array("both: ", @both);
+    print_array("<---: ", @leftset);
+    print_array("--->: ", @rightset);
+}
+
+
+sub trim
+{
+    my ($line) = @_;
+
+    chomp $line;
+    $line =~ s/^\s*//;
+    $line =~ s/\s*$//;
+
+    return $line;
+}
+
+sub print_array
+{
+    ($pre_string, @array) = @_;
+
+    foreach $element (sort @array)
+    {
+        $element_string = $pre_string . $element;
+        print "$element_string\n";
+    }
+}
+
+sub handle_command_line
+{
+    GetOptions( "intersection!" => \$intersection,
+                "union!" => \$union,
+                "leftonly!" => \$leftonly,
+                "rightonly!" => \$rightonly,
+              );
+}
+
